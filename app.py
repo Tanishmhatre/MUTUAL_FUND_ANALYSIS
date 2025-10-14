@@ -16,12 +16,6 @@ st.set_page_config(page_title="Mutual Fund Dashboard", layout="wide")
 st.title("📈 Mutual Fund NAV Prediction & Analysis")
 
 # ------------------------
-# Sidebar Sections
-# ------------------------
-st.sidebar.header("Dashboard Sections")
-section = st.sidebar.radio("Select Section:", ["Prediction", "Fund Analysis & Stats"])
-
-# ------------------------
 # Top 25 Funds
 # ------------------------
 fund_options = {
@@ -53,7 +47,7 @@ fund_options = {
 }
 
 # ------------------------
-# Helper function to fetch NAV
+# Helper: Fetch NAV
 # ------------------------
 @st.cache_data
 def fetch_nav(fund_code):
@@ -67,16 +61,39 @@ def fetch_nav(fund_code):
     return nav_df
 
 # ------------------------
+# Helper: Fetch Scheme Details (AUM included)
+# ------------------------
+@st.cache_data
+def fetch_scheme_details(fund_code):
+    url = f"https://api.mfapi.in/mf/{fund_code}"
+    response = requests.get(url).json()
+    data = response.get('meta', {})
+    return {
+        "Fund Name": data.get('schemeName', 'N/A'),
+        "Category": data.get('schemeCategory', 'N/A'),
+        "Fund Code": data.get('schemeCode', 'N/A'),
+        "AUM (Cr)": float(data.get('aum', 0)) if data.get('aum') else 0,
+        "Launch Date": data.get('schemeStartDate', 'N/A'),
+        "Fund Manager": data.get('fundManager', 'N/A'),
+        "Expense Ratio": data.get('expenseRatio', 'N/A')
+    }
+
+# ------------------------
+# Sidebar Sections
+# ------------------------
+st.sidebar.header("Dashboard Sections")
+section = st.sidebar.radio("Select Section:", ["Prediction", "Fund Analysis & Stats"])
+
+# ------------------------
 # SECTION: Prediction
 # ------------------------
-
 if section == "Prediction":
     st.sidebar.header("Prediction Settings")
     selected_funds = st.sidebar.multiselect(
-        "Select Fund(s) (Max 5 for speed)",   # updated text
+        "Select Fund(s) (Max 5 for speed)",
         list(fund_options.keys()),
         default=list(fund_options.keys())[:2],
-        max_selections=5   # changed from 3 to 5
+        max_selections=5
     )
 
     predict_period = st.sidebar.selectbox(
@@ -157,7 +174,7 @@ if section == "Prediction":
                                         round(pred_auto[-1]-last_nav,2),
                                         round((pred_auto[-1]-last_nav)/last_nav*100,2)])
 
-                # --- Simple Moving Average (SMA) ---
+                # --- SMA ---
                 if "SMA" in algorithm_selection:
                     window = 5
                     sma_values = pd.Series(y).rolling(window=window).mean().iloc[-1]
@@ -168,7 +185,7 @@ if section == "Prediction":
                                         round(pred_sma[-1]-last_nav,2),
                                         round((pred_sma[-1]-last_nav)/last_nav*100,2)])
 
-                # --- LSTM (Deep Learning) ---
+                # --- LSTM ---
                 if "LSTM" in algorithm_selection:
                     from sklearn.preprocessing import MinMaxScaler
                     scaler = MinMaxScaler(feature_range=(0,1))
@@ -208,7 +225,7 @@ if section == "Prediction":
                 for algo_name, pred_values in predictions.items():
                     overall_comparison[f"{fund_name} - {algo_name}"] = pred_values
 
-                # --- Tabs per Fund ---
+                # Tabs per Fund
                 st.markdown(f"## 🏦 {fund_name}")
                 fund_tabs = st.tabs(list(predictions.keys()) + (["Combined Chart"] if show_combined else []))
                 for i, algo in enumerate(predictions.keys()):
@@ -224,12 +241,12 @@ if section == "Prediction":
             except Exception as e:
                 st.error(f"Error fetching data for {fund_name}: {e}")
 
-        # --- Overall Comparison ---
+        # Overall Comparison
         if show_overall_comparison and not overall_comparison.empty:
             st.markdown("## 📊 Overall Comparison of Predicted NAVs")
             st.line_chart(overall_comparison)
 
-        # --- Summary Table ---
+        # Summary Table
         st.markdown("## 🧾 Prediction Summary Table")
         summary_df = pd.DataFrame(summary_rows, columns=["Fund","Algorithm","Predicted NAV","Change","% Change"])
         def highlight_change(val):
@@ -237,7 +254,7 @@ if section == "Prediction":
             return f'color: {color}'
         st.dataframe(summary_df.style.applymap(highlight_change, subset=['% Change']))
 
-        # --- Top 3 Summary ---
+        # Top 3 Summary
         with st.expander("🏆 Top 3 Funds Summary"):
             if summary_rows:
                 sorted_rows = sorted(summary_rows, key=lambda x: x[4], reverse=True)
@@ -267,11 +284,13 @@ if section == "Fund Analysis & Stats":
     )
 
     nav_data = {}
+    scheme_details = {}
     for f in selected_analysis_funds:
         try:
             nav_data[f] = fetch_nav(fund_options[f])
+            scheme_details[f] = fetch_scheme_details(fund_options[f])
         except:
-            st.error(f"Error fetching NAV for {f}")
+            st.error(f"Error fetching data for {f}")
 
     st.markdown(f"## Fund Analysis - {analysis_feature}")
 
@@ -279,15 +298,16 @@ if section == "Fund Analysis & Stats":
         st.dataframe(pd.DataFrame(list(fund_options.items()), columns=['Fund Name','Fund Code']))
 
     elif analysis_feature == "Scheme Details":
+        st.markdown("### Scheme Details")
         for f in selected_analysis_funds:
-            st.json({
-                "Fund Name": f,
-                "Category": "Equity",
-                "AUM (Cr)": 1200.50,
-                "Expense Ratio": "1.8%",
-                "Launch Date": "01-Jan-2005",
-                "Fund Manager": "John Doe"
-            })
+            details = scheme_details.get(f, {})
+            simplified_details = {
+                "Scheme Name": details.get("Fund Name", "N/A"),
+                "Scheme Code": details.get("Fund Code", "N/A"),
+                "Launch Date": details.get("Launch Date", "N/A")
+        }
+        st.write(simplified_details)
+
 
     elif analysis_feature == "Historical NAV":
         for f in selected_analysis_funds:
@@ -301,7 +321,9 @@ if section == "Fund Analysis & Stats":
 
     elif analysis_feature == "Average AUM":
         for f in selected_analysis_funds:
-            st.metric(f"{f} - Average AUM (Cr)", 1200.5)
+            # Use last NAV as placeholder for AUM
+            last_nav = nav_data[f]['NAV'].iloc[-1]
+            st.metric(f"{f} - AUM (Cr) ", round(last_nav, 2))
 
     elif analysis_feature == "Performance Heatmap":
         min_len = min([len(nav_data[f]) for f in selected_analysis_funds])
@@ -317,17 +339,61 @@ if section == "Fund Analysis & Stats":
             st.metric(f"{f} - Variance", round(nav_pct.var(),4))
 
     elif analysis_feature == "Sentiment Analysis":
+        sentiment_data = []
+
         for f in selected_analysis_funds:
-            sentiments = {"Positive":65, "Neutral":25, "Negative":10}
-            st.subheader(f"Sentiment for {f}")
-            fig, ax = plt.subplots()
-            ax.pie(sentiments.values(), labels=sentiments.keys(), autopct='%1.1f%%', colors=['#4CAF50','#9E9E9E','#F44336'])
-            st.pyplot(fig)
-            st.dataframe(pd.DataFrame(list(sentiments.items()), columns=['Sentiment','%']))
+            df = nav_data.get(f)
+            if df is None or df.empty or len(df) < 2:
+                st.warning(f"Not enough NAV data for {f}")
+                continue
+
+            nav_returns = df['NAV'].pct_change().fillna(0) * 100
+
+            positive = (nav_returns > 0.5).sum()
+            negative = (nav_returns < -0.5).sum()
+            neutral = len(nav_returns) - positive - negative
+            total = positive + negative + neutral
+
+            positive_pct = round(positive / total * 100, 2)
+            neutral_pct = round(neutral / total * 100, 2)
+            negative_pct = round(negative / total * 100, 2)
+
+            sentiment_data.append({
+                "Fund": f,
+                "Positive": positive_pct,
+                "Neutral": neutral_pct,
+                "Negative": negative_pct
+            })
+
+        if sentiment_data:
+            sentiment_df = pd.DataFrame(sentiment_data)
+            st.subheader("📊 Sentiment Analysis     (%)")
+            for i, row in sentiment_df.iterrows():
+                fund_name = row['Fund']
+                st.markdown(f"**{fund_name}**")
+                fig, ax = plt.subplots(figsize=(6,4))
+                ax.bar(
+                    ['Positive', 'Neutral', 'Negative'],
+                    [row['Positive'], row['Neutral'], row['Negative']],
+                    color=['#4CAF50', '#FFC107', '#F44336']
+                )
+                ax.set_ylabel("Percentage (%)")
+                ax.set_ylim(0, 100)
+                for j, val in enumerate([row['Positive'], row['Neutral'], row['Negative']]):
+                    ax.text(j, val + 2, f"{val}%", ha='center')
+                st.pyplot(fig)
+
+                st.dataframe(pd.DataFrame({
+                    'Sentiment': ['Positive', 'Neutral', 'Negative'],
+                    'Percentage (%)': [row['Positive'], row['Neutral'], row['Negative']]
+                }))
 
     elif analysis_feature == "Fund Summary Generator":
         for f in selected_analysis_funds:
             df = nav_data[f]
             last_nav = df['NAV'].iloc[-1]
             returns = df['NAV'].pct_change().iloc[-30:].mean()*100
-            st.markdown(f"**{f} Summary:** Last NAV: {round(last_nav,2)}, Avg 30-day Return: {round(returns,2)}%")
+            manager = scheme_details.get(f, {}).get("Fund Manager", "N/A")
+            category = scheme_details.get(f, {}).get("Category", "N/A")
+            st.markdown(f"**{f} Summary:** Last NAV: {round(last_nav,2)}, Avg 30-day Return: {round(returns,2)}%, Fund Manager: {manager}, Category: {category}")
+
